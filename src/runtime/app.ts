@@ -18,6 +18,7 @@ import {
   createFetch as createLocalFetch,
 } from "unenv/runtime/fetch/index";
 import { createHooks, Hookable } from "hookable";
+import consola from "consola";
 import type { NitroRuntimeHooks, CaptureError } from "./types";
 import { useRuntimeConfig } from "./config";
 import { cachedEventHandler } from "./cache";
@@ -151,6 +152,7 @@ function createNitroApp(): NitroApp {
   );
 
   for (const h of handlers) {
+    consola.error(h.route)
     let handler = h.lazy ? lazyEventHandler(h.handler) : h.handler;
     if (h.middleware || !h.route) {
       const middlewareBase = (config.app.baseURL + (h.route || "/")).replace(

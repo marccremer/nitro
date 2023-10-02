@@ -1,8 +1,12 @@
 import "#internal/nitro/virtual/polyfill";
-import type { HttpRequest, HttpResponse } from "@azure/functions";
+import { HttpRequest, HttpResponse, app } from "@azure/functions";
 import { nitroApp } from "../app";
 import { getAzureParsedCookiesFromHeaders } from "../utils.azure";
 import { normalizeLambdaOutgoingHeaders } from "../utils.lambda";
+import {
+  HandlerDefinition,
+  handlers,
+} from "#internal/nitro/virtual/server-handlers";
 
 export async function handle(context: { res: HttpResponse }, req: HttpRequest) {
   const url = "/" + (req.params.url || "");
@@ -22,4 +26,39 @@ export async function handle(context: { res: HttpResponse }, req: HttpRequest) {
     headers: normalizeLambdaOutgoingHeaders(headers, true),
     body: body ? body.toString() : statusText,
   };
+}
+
+const supportedMethods = ["delete", "get", "patch", "post", "put"];
+for (const handle of handlers) {
+  const createAzureFunction = getAzureBuilder(handle.method);
+  const name = handle.route.replace("/", "-");
+/*   createAzureFunction(handle.route, {
+    route: handle.route,
+    handler: async (ctx, req) => {
+      return { body: "" };
+    },
+  }); */
+}
+
+function getAzureBuilder(handlerMethod: HandlerDefinition["method"]) {
+  switch (handlerMethod) {
+    case "get": {
+      return app.get;
+    }
+    case "patch": {
+      return app.patch;
+    }
+    case "post": {
+      return app.post;
+    }
+    case "put": {
+      return app.put;
+    }
+    case "delete": {
+      return app.deleteRequest;
+    }
+    default: {
+      return app.http;
+    }
+  }
 }
