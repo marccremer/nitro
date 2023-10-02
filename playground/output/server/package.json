@@ -1,0 +1,12 @@
+{
+  "name": "nitropack-prod",
+  "version": "2.6.3",
+  "type": "module",
+  "main": "src/*.js",
+  "private": true,
+  "dependencies": {
+    "@azure/functions": "4.0.0-alpha.13",
+    "@fastify/busboy": "2.0.0",
+    "undici": "5.25.3"
+  }
+}
