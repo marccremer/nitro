@@ -21,6 +21,7 @@ import { IncomingMessage as NodeIncomingMessage } from "unenv/runtime/node/http/
 import { ServerResponse as NodeServerResponse } from "unenv/runtime/node/http/_response";
 
 import { Handle, createCall } from "unenv/runtime/fetch";
+import consola from "consola";
 import { nitroApp } from "../app";
 import { getAzureParsedCookiesFromHeaders } from "../utils.azure";
 import { normalizeLambdaOutgoingHeaders } from "../utils.lambda";
@@ -29,82 +30,22 @@ import {
   handlers,
 } from "#internal/nitro/virtual/server-handlers";
 
-for (const handle of handlers.filter((h) => !!h.route)) {
-  const createAzureFunction = getAzureBuilder(handle.method);
-  const name = routeToName(handle.route);
-  const fun = handle.handler as EventHandler;
-  createAzureFunction(name, {
-    route: handle.route,
+const handle = toWebHandler(nitroApp.h3App);
+
+for (const h of handlers) {
+  if (h.middleware) {
+    continue;
+  }
+  const routename = routeToRoute(h.route);
+  const funcname = routeToName(h.route);
+  consola.log({ funcname, routename });
+  app.http(funcname, {
+    route: routename,
     handler: async (req, ctx) => {
-      const { body, status, headers } = await _handleAzureRequest(
-        req,
-        ctx,
-        fun
-      );
-      return {
-        status,
-        body,
-        headers: normalizeLambdaOutgoingHeaders(headers, true),
-      };
+      const res = await handle(req as unknown as Request);
+      return res as unknown as HttpResponse;
     },
   });
-}
-
-async function _handleAzureRequest(
-  req: HttpRequest,
-  ctx: InvocationContext,
-  handler: EventHandler
-) {
-  const path = req.url;
-  const method = (req.method || "GET").toUpperCase() as HTTPMethod;
-  const headers = req.headers as Headers;
-
-  // Shim for Node.js request and response objects
-  // TODO: Remove in next major version
-  const nodeReq =
-    new NodeIncomingMessage() as unknown /* unenv */ as IncomingMessage;
-  const nodeRes = new NodeServerResponse(nodeReq);
-
-  // Fill node request properties
-  nodeReq.method = method;
-  nodeReq.url = path;
-  // TODO: Normalize with array merge and lazy getter
-  nodeReq.headers = Object.fromEntries(headers.entries());
-
-  // Create new event
-  const event = createEvent(nodeReq, nodeRes);
-
-  // Fill internal event properties
-  event._method = method;
-  event._path = path;
-  event._headers = headers;
-  if (req.body) {
-    event._requestBody = req.body;
-  }
-
-  Object.assign(event.context, { azure: ctx });
-
-  // Run app handler logic
-  try {
-    await handler(event);
-  } catch (_error: any) {
-    const error = createError(_error);
-    if (!isError(_error)) {
-      error.unhandled = true;
-    }
-
-    return {
-      status: 500,
-      body: error,
-    };
-  }
-
-  return {
-    status: nodeRes.statusCode,
-    statusText: nodeRes.statusMessage,
-    headers: nodeRes._headers,
-    body: (nodeRes as any)._data,
-  };
 }
 
 /* export async function handle(context: { res: HttpResponse }, req: HttpRequest) {
@@ -137,6 +78,13 @@ function routeToName(route: string | undefined) {
   }
   const r = route.replace("/", "-");
   return `${prefix}-${r}`;
+}
+
+function routeToRoute(route: string) {
+  if (route === "/") {
+    return "root";
+  }
+  return route.slice(1);
 }
 
 function getAzureBuilder(handlerMethod: HandlerDefinition["method"]) {

@@ -1,4 +1,5 @@
 import { createWriteStream } from "node:fs";
+import * as fs from "node:fs";
 import archiver from "archiver";
 import { join, resolve } from "pathe";
 import { writeFile } from "../utils";
@@ -19,56 +20,56 @@ export const azureFunctions = defineNitroPreset({
   },
 });
 
-function zipDirectory(dir: string, outfile: string): Promise<undefined> {
-  const archive = archiver("zip", { zlib: { level: 9 } });
-  const stream = createWriteStream(outfile);
-
-  return new Promise((resolve, reject) => {
-    archive
-      .directory(dir, false)
-      .on("error", (err: Error) => reject(err))
-      .pipe(stream);
-
-    stream.on("close", () => resolve(undefined));
-    archive.finalize();
-  });
-}
-
 async function writeRoutes(nitro: Nitro) {
   const host = {
     version: "2.0",
-    extensions: { http: { routePrefix: "" } },
-  };
-
-  const functionDefinition = {
-    entryPoint: "handle",
-    bindings: [
-      {
-        authLevel: "anonymous",
-        type: "httpTrigger",
-        direction: "in",
-        name: "req",
-        route: "{*url}",
-        methods: ["delete", "get", "head", "options", "patch", "post", "put"],
+    extensionBundle: {
+      id: "Microsoft.Azure.Functions.ExtensionBundle",
+      version: "[4.*, 5.0.0)",
+    },
+    extensions: {
+      http: {
+        routePrefix: "",
       },
-      {
-        type: "http",
-        direction: "out",
-        name: "res",
-      },
-    ],
+    },
   };
+  const localSettings = {
+    IsEncrypted: false,
+    Values: {
+      FUNCTIONS_WORKER_RUNTIME: "node",
+      AzureWebJobsFeatureFlags: "EnableWorkerIndexing",
+    },
+  };
+  const serverDir = "server";
 
   await writeFile(
-    resolve(nitro.options.output.serverDir, "function.json"),
-    JSON.stringify(functionDefinition)
-  );
-  await writeFile(
-    resolve(nitro.options.output.dir, "host.json"),
+    resolve(nitro.options.output.dir, serverDir, "host.json"),
     JSON.stringify(host)
   );
-  await zipDirectory(
-    nitro.options.output.dir,
-    join(nitro.options.output.dir, "deploy.zip")
+  await writeFile(
+    resolve(nitro.options.output.dir, serverDir, "local.settings.json"),
+    JSON.stringify(localSettings)
   );
+  const packagePath = resolve(
+    nitro.options.output.dir,
+    serverDir,
+    "package.json"
+  );
+
+  const p = readFileAsJson(packagePath);
+  p.main = "./*.mjs";
+
+  await writeFile(packagePath, JSON.stringify(p));
+}
+
+function readFileAsJson(filePath: string): any {
+  try {
+    const fileContent = fs.readFileSync(filePath, "utf8");
+    const jsonData = JSON.parse(fileContent);
+    return jsonData;
+  } catch (error) {
+    throw new Error(
+      `Error reading or parsing JSON file at ${filePath}: ${error.message}`
+    );
+  }
 }
