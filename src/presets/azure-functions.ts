@@ -29,7 +29,7 @@ async function writeRoutes(nitro: Nitro) {
     },
     extensions: {
       http: {
-        routePrefix: "",
+        routePrefix: nitro.options.baseURL.slice(1, -1),
       },
     },
   };

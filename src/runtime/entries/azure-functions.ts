@@ -36,10 +36,11 @@ for (const h of handlers) {
   if (h.middleware) {
     continue;
   }
-  const routename = routeToRoute(h.route);
-  const funcname = routeToName(h.route);
+  const routename = nitroToAzureRoute(h.route);
+  const funcname = routeToFuncName(h.route);
   consola.log({ funcname, routename });
-  app.http(funcname, {
+  const azureBuilder = getAzureBuilder(h.method);
+  azureBuilder(funcname, {
     route: routename,
     handler: async (req, ctx) => {
       const res = await handle(req as unknown as Request);
@@ -70,21 +71,68 @@ for (const h of handlers) {
   };
 }
  */
-function routeToName(route: string | undefined) {
-  const salt = v4();
-  const prefix = `func-${salt}`;
-  if (!route || route.length === 0) {
-    return prefix;
+function routeToFuncName(routeA: string | undefined) {
+  if (routeA === "/__nuxt_error") {
+    return "nuxterror";
   }
-  const r = route.replace("/", "-");
-  return `${prefix}-${r}`;
+  if (routeA === "/**") {
+    return "vuePages";
+  }
+  // Remove leading slash and split the route by slashes
+  const parts = routeA.replace(/^\//, "").split("/");
+
+  // Filter and sanitize each part
+  const sanitizedParts = parts
+    .map((part) => {
+      // Remove square brackets and optional indicators
+      part = part.replace(/\[\[|]]|\[|]/g, "");
+
+      // Replace invalid characters with hyphens
+      part = part.replace(/[^\dA-Za-z-]/g, "-");
+
+      // Ensure the function name is between 1 and 60 characters
+      part = part.slice(0, 60);
+
+      return part;
+    })
+    .filter(Boolean); // Remove empty parts
+
+  // Combine sanitized parts with hyphens
+  const functionName = sanitizedParts.join("-").toLowerCase();
+
+  /*   // Apply any additional keyword exclusions here
+  const excludedKeywords = ["api", "function", "route", "system"];
+  for (const keyword of excludedKeywords) {
+    if (functionName.toLowerCase().includes(keyword)) {
+      return "invalid"; // You can choose how to handle excluded keywords
+    }
+  } */
+
+  return functionName;
 }
 
-function routeToRoute(route: string) {
-  if (route === "/") {
-    return "root";
+function nitroToAzureRoute(routeA: string): string {
+  if (routeA === "/**") {
+    return "{*restOfPath}";
   }
-  return route.slice(1);
+  // Regular expression to match dynamic parameters and optional parameters
+  const dynamicParamRegex = /\[(.*?)]/g;
+  const optionalParamRegex = /\[\[([^\]]*)]]/g;
+  // Replace optional parameters in System B
+  routeA = routeA.replace(optionalParamRegex, "{$1?}");
+
+  // Replace dynamic parameters with curly braces in System B
+  routeA = routeA.replace(dynamicParamRegex, "{$1}");
+
+  // Replace the special case for matching any route
+  routeA = routeA.replace(/\[\.{3}(.*?)]/g, "{*restOfPath}");
+
+  // Remove the initial forward slash
+  if (routeA.startsWith("/")) {
+    routeA = routeA.slice(1);
+  }
+
+  return routeA;
 }
 
 function getAzureBuilder(handlerMethod: HandlerDefinition["method"]) {
