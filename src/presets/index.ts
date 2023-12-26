@@ -1,5 +1,6 @@
 export * from "./aws-lambda";
 export * from "./azure-functions";
+export * from "./azure-functions-v4";
 export * from "./azure";
 export * from "./base-worker";
 export * from "./bun";
