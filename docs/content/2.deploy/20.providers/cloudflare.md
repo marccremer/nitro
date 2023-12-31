@@ -22,13 +22,17 @@ compatibility_date = "2022-09-10"
 account_id = "<the account_id you obtained (optional)>"
 route = "<mainly useful when you want to setup custom domains (optional too)>"
 
+rules = [
+  { type = "ESModule", globs = ["**/*.js", "**/*.mjs"]},
+]
+
 [site]
 bucket = ".output/public"
 ```
 
 ### Testing locally
 
-You can use [wrangler2](https://github.com/cloudflare/wrangler2), to test your app locally:
+You can use [wrangler2](https://github.com/cloudflare/workers-sdk), to test your app locally:
 
 ```bash
 NITRO_PRESET=cloudflare yarn build
@@ -148,11 +152,11 @@ If you use the GitHub/GitLab [integration](https://developers.cloudflare.com/pag
 
 ### Direct Upload
 
-Alternatively, you can use [wrangler](https://github.com/cloudflare/wrangler2) to upload your project to Cloudflare. In this case, you will have to set the preset manually:
+Alternatively, you can use [wrangler](https://github.com/cloudflare/workers-sdk) to upload your project to Cloudflare. In this case, you will have to set the preset manually:
 
 ### Deploy from your local machine using wrangler
 
-Install [wrangler](https://github.com/cloudflare/wrangler) and login to your Cloudflare account:
+Install [wrangler](https://github.com/cloudflare/workers-sdk) and login to your Cloudflare account:
 
 ```bash
 npm i wrangler -g
@@ -296,29 +300,24 @@ SECRET="top-secret"
 
 ## Advanced
 
-### Experimental Dynamic Imports
+### Local Wrangler Dev builds
 
-By default cloudflare presets output to a single bundle file.
+By default `wrangler dev` requires nitro to be built before it can be served by wrangler.
 
-In order to try experimental dynamic imports you need to set the `NITRO_EXP_CLOUDFLARE_DYNAMIC_IMPORTS` environment variable for build command.
+This can become tiresome if you're making changes to your nitro app and keep rebuilding to test changes in wrangler.
 
 ::alert{type="warning"}
-This is an experimental mode and is likely not working at the moment!
+This is a temporary workaround until nitro has better support for wrangler dev mode!
 ::
 
-With `cloudflare_module` preset, you need to add the following rule to your `wrangler.toml` file:
+To instruct wrangler to automatically rebuild nitro when it detects file changes, you need to add the following rule to your `wrangler.toml` file:
 
-```diff [wrangler.toml]
-  name = "playground"
-  main = "./.output/server/index.mjs"
-  workers_dev = true
-  compatibility_date = "2022-09-10"
-  account_id = "<the account_id you obtained (optional)>"
-  route = "<mainly useful when you want to setup custom domains (optional too)>"
-+ rules = [
-+   { type = "ESModule", globs = ["**/*.js", "**/*.mjs"]},
-+ ]
-
-  [site]
-  bucket = ".output/public"
+```[wrangler.toml]
++ [env.development.build]
++ command = "NITRO_PRESET=cloudflare npm run build" // Replace npm with your packagemanager (npm, pnpm, yarn, bun)
++ cwd = "./"
++ watch_dir = ["./routes", "./nitro.config.ts"]
 ```
+
+Now you need to run wrangler in development mode using `wrangler dev --env development`
+When files change in nitro, wrangler will rebuild and serve the new files

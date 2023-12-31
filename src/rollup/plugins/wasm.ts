@@ -1,69 +1,145 @@
 import { createHash } from "node:crypto";
-import { extname, basename } from "node:path";
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
+import { basename, normalize } from "pathe";
 import type { Plugin } from "rollup";
-import wasmBundle from "@rollup/plugin-wasm";
+import MagicString from "magic-string";
 import { WasmOptions } from "../../types";
 
-const PLUGIN_NAME = "nitro:wasm-import";
-const wasmRegex = /\.wasm$/;
+const WASM_ID_PREFIX = "\0nitro-wasm:";
 
-export function wasm(options: WasmOptions): Plugin {
-  return options.esmImport ? wasmImport() : wasmBundle(options.rollup);
-}
+export function wasm(opts: WasmOptions): Plugin {
+  type WasmAssetInfo = {
+    fileName: string;
+    id: string;
+    source: Buffer;
+    hash: string;
+  };
 
-export function wasmImport(): Plugin {
-  const copies = Object.create(null);
+  const wasmSources = new Map<string /* sourceFile */, WasmAssetInfo>();
+  const wasmImports = new Map<string /* id */, WasmAssetInfo>();
 
-  return {
-    name: PLUGIN_NAME,
-    async resolveId(id: string, importer: string) {
-      if (copies[id]) {
-        return {
-          id: copies[id].publicFilepath,
-          external: true,
-        };
+  return <Plugin>{
+    name: "nitro:wasm",
+    async resolveId(id, importer, options) {
+      // Only handle .wasm imports
+      if (!id.endsWith(".wasm")) {
+        return null;
       }
-      if (wasmRegex.test(id)) {
-        const { id: filepath } =
-          (await this.resolve(id, importer, { skipSelf: true })) || {};
-        if (!filepath || filepath === id) {
+      if (id.startsWith(WASM_ID_PREFIX)) {
+        return id;
+      }
+
+      // Resolve the source file real path
+      const sourceFile = await this.resolve(id, importer, options).then((r) =>
+        r?.id ? normalize(r.id) : null
+      );
+      if (!sourceFile || !existsSync(sourceFile)) {
+        return null;
+      }
+
+      // Read (cached) Asset
+      let wasmAsset: WasmAssetInfo | undefined = wasmSources.get(sourceFile);
+      if (!wasmAsset) {
+        wasmAsset = {
+          id: WASM_ID_PREFIX + sourceFile,
+          fileName: "",
+          source: undefined,
+          hash: "",
+        };
+        wasmSources.set(sourceFile, wasmAsset);
+        wasmImports.set(wasmAsset.id, wasmAsset);
+
+        wasmAsset.source = await fs.readFile(sourceFile);
+        wasmAsset.hash = sha1(wasmAsset.source);
+        const _baseName = basename(sourceFile, ".wasm");
+        wasmAsset.fileName = `wasm/${_baseName}-${wasmAsset.hash}.wasm`;
+
+        await this.emitFile({
+          type: "asset",
+          source: wasmAsset.source,
+          fileName: wasmAsset.fileName,
+        });
+      }
+
+      return { id: wasmAsset.id };
+    },
+    load(id) {
+      if (!id.startsWith(WASM_ID_PREFIX)) {
+        return;
+      }
+      const asset = wasmImports.get(id);
+      if (!asset) {
+        return;
+      }
+      return {
+        code: `export default "${asset.id}";`,
+        map: null,
+        syntheticNamedExports: true,
+      };
+    },
+    renderChunk(code, chunk, options) {
+      if (
+        !chunk.moduleIds.some((id) => id.startsWith(WASM_ID_PREFIX)) ||
+        !code.includes(WASM_ID_PREFIX)
+      ) {
+        return;
+      }
+
+      const s = new MagicString(code);
+
+      const resolveImport = (id) => {
+        if (typeof id !== "string" || !id.startsWith(WASM_ID_PREFIX)) {
           return null;
         }
-        const buffer = await fs.readFile(filepath);
-        const hash = createHash("sha1")
-          .update(buffer)
-          .digest("hex")
-          .slice(0, 16);
-        const ext = extname(filepath);
-        const name = basename(filepath, ext);
-
-        const outputFileName = `wasm/${name}-${hash}${ext}`;
-        const publicFilepath = `./${outputFileName}`;
-
-        copies[id] = {
-          filename: outputFileName,
-          publicFilepath,
-          buffer,
-        };
-
+        const asset = wasmImports.get(id);
+        if (!asset) {
+          return null;
+        }
+        const nestedLevel = chunk.fileName.split("/").length - 1;
+        const relativeId =
+          (nestedLevel ? "../".repeat(nestedLevel) : "./") + asset.fileName;
         return {
-          id: publicFilepath,
-          external: true,
+          relativeId,
+          asset,
+        };
+      };
+
+      const ReplaceRE = new RegExp(`"(${WASM_ID_PREFIX}[^"]+)"`, "g");
+      for (const match of code.matchAll(ReplaceRE)) {
+        const resolved = resolveImport(match[1]);
+        if (!resolved) {
+          console.warn(
+            `Failed to resolve WASM import: ${JSON.stringify(match[1])}`
+          );
+          continue;
+        }
+
+        let dataCode: string;
+        if (opts.esmImport) {
+          dataCode = `await import("${resolved.relativeId}").then(r => r?.default || r)`;
+        } else {
+          const base64Str = resolved.asset.source.toString("base64");
+          dataCode = `(()=>{const d=atob("${base64Str}");const s=d.length;const b=new Uint8Array(s);for(let i=0;i<s;i++)b[i]=d.charCodeAt(i);return b})()`;
+        }
+
+        let code = `await WebAssembly.instantiate(${dataCode}).then(r => r?.exports||r?.instance?.exports || r);`;
+
+        if (opts.lazy) {
+          code = `(()=>{const e=async()=>{return ${code}};let _p;const p=()=>{if(!_p)_p=e();return _p;};return {then:cb=>p().then(cb),catch:cb=>p().catch(cb)}})()`;
+        }
+
+        s.overwrite(match.index, match.index + match[0].length, code);
+      }
+      if (s.hasChanged()) {
+        return {
+          code: s.toString(),
+          map: s.generateMap({ includeContent: true }),
         };
       }
     },
-    async generateBundle() {
-      await Promise.all(
-        Object.keys(copies).map(async (name) => {
-          const copy = copies[name];
-          await this.emitFile({
-            type: "asset",
-            source: copy.buffer,
-            fileName: copy.filename,
-          });
-        })
-      );
-    },
   };
+}
+
+function sha1(source: Buffer) {
+  return createHash("sha1").update(source).digest("hex").slice(0, 16);
 }
