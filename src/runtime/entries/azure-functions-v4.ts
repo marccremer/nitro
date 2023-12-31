@@ -61,6 +61,28 @@ function safeAssign<T, U>(target: T, source: U): Assign<T, U> {
   return { ...target, ...source } as Assign<T, U>;
 }
 
+function* generateAlphabeticStrings(length: number): Generator<string> {
+  const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const limit = letters.length - 1;
+
+  let currentNumber = 0;
+
+  while (true) {
+    let result = "";
+    for (let index = 0; index < length; index++) {
+      const letterIndex = currentNumber % limit;
+      result += letters.at(letterIndex);
+      currentNumber++;
+    }
+
+    yield result;
+
+    currentNumber++;
+  }
+}
+
+const letterGenerator = generateAlphabeticStrings(4);
+
 function getHandlers() {
   console.warn("got handlers", !!config.nitro.routeRules);
   if (config.nitro.routeRules) {
@@ -168,13 +190,16 @@ function routeToFuncName(route: string) {
   const sanitizedParts = parts
     .map((part) => {
       // Remove Numners
-      part = part.replace(/\d/g, v4());
+      part = part.replace(/\d+/g, letterGenerator.next().value);
       // Remove square brackets and optional indicators
       part = part.replace(/\[\[|]]|\[|]/g, "");
 
       // Replace invalid characters with hyphens
       part = part.replace(/[^\dA-Za-z-]/g, "-");
-
+      // starting with - is not allowed
+      if (part.startsWith("-")) {
+        part = part.slice(1);
+      }
       // Ensure the function name is between 1 and 60 characters
       part = part.slice(0, 60);
 
