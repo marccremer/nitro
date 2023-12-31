@@ -21,7 +21,6 @@ import {
 } from "h3";
 import { IncomingMessage as NodeIncomingMessage } from "unenv/runtime/node/http/_request";
 import { ServerResponse as NodeServerResponse } from "unenv/runtime/node/http/_response";
-
 import { Handle, createCall } from "unenv/runtime/fetch";
 import consola from "consola";
 import { nitroApp } from "../app";
@@ -156,16 +155,6 @@ for (const [route, handlers] of Object.entries(handlerGroups)) {
   }
 }
 
-function replaceNumbersWithLetter(
-  inputString: string,
-  replacementLetter: string
-): string {
-  // Use a regular expression to match digits and replace them with the specified letter
-  const resultString = inputString.replace(/\d/g, replacementLetter);
-
-  return resultString;
-}
-
 function routeToFuncName(route: string) {
   if (route === "/__nuxt_error") {
     return "nuxterror";
@@ -178,7 +167,8 @@ function routeToFuncName(route: string) {
   // Filter and sanitize each part
   const sanitizedParts = parts
     .map((part) => {
-      part = part.replace(/\d/g, "X");
+      // Remove Numners
+      part = part.replace(/\d/g, v4());
       // Remove square brackets and optional indicators
       part = part.replace(/\[\[|]]|\[|]/g, "");
 
