@@ -40,7 +40,7 @@ describe(
         });
         p.all.on("data", (a) => console.error(String(a)));
         ctx.server = {
-          url: `http://127.0.0.1:7071`,
+          url: `http://127.0.0.1:8080`,
           close: () => p.kill(9),
         } as any;
         try {

@@ -27,10 +27,11 @@ import consola from "consola";
 import { nitroApp } from "../app";
 import { getAzureParsedCookiesFromHeaders } from "../utils.azure";
 import { normalizeLambdaOutgoingHeaders } from "../utils.lambda";
+import { useRuntimeConfig } from "../config";
 import { handler } from "./lagon";
 import {
   HandlerDefinition,
-  handlers,
+  handlers as initialHandlers,
 } from "#internal/nitro/virtual/server-handlers";
 const ALLOWED_AZURE_METHODS = new Set<HttpMethod>([
   "GET",
@@ -54,11 +55,37 @@ const DEFAULT_METHODS: Lowercase<HttpMethod>[] = [
   "options",
   "trace",
 ];
+type Assign<T, U> = U extends Record<string, unknown> ? T & U : never;
+const config = useRuntimeConfig();
 
+function safeAssign<T, U>(target: T, source: U): Assign<T, U> {
+  return { ...target, ...source } as Assign<T, U>;
+}
+
+function getHandlers() {
+  console.warn("got handlers", !!config.nitro.routeRules);
+  if (config.nitro.routeRules) {
+    const DummyHandler: EventHandler = safeAssign(
+      (event: H3Event<Request>) => new Response(),
+      { __is_handler__: true }
+    );
+    const ruleHandlers: HandlerDefinition[] = Object.keys(
+      config.nitro.routeRules
+    ).map((route) => ({
+      route,
+      handler: () => DummyHandler,
+      lazy: true,
+    }));
+    return [...ruleHandlers, ...initialHandlers];
+  } else {
+    return initialHandlers;
+  }
+}
 /**
  * We route all functions through nitro so we dont miss a middleware
  */
 const handle = toWebHandler(nitroApp.h3App);
+const handlers = getHandlers();
 interface GroupedResult<T> {
   [key: string]: [T, ...T[]];
 }
